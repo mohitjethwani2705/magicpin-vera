@@ -738,10 +738,10 @@ def handle_reply(
             if t.get("role") in ("merchant", "customer")
         ]
         if len(all_merchant) >= 2:
-            last = _normalize_text(all_merchant[-1])
+            last = _normalize(all_merchant[-1])
             count = sum(
                 1 for m in all_merchant[:-1]
-                if _similarity_ratio(last, _normalize_text(m)) >= settings.auto_reply_similarity_threshold
+                if _similarity_ratio(last, _normalize(m)) >= settings.auto_reply_similarity_threshold
             )
             conversation_state.auto_reply_count = count
         else:
