@@ -129,25 +129,33 @@ class ConversationState:
 def _groq_chat(messages: list[dict], max_tokens: int = 150) -> str:
     """
     POST to the Groq OpenAI-compatible endpoint and return the reply text.
-    Uses direct requests.post — identical to bot.py pattern.
-    Raises on non-2xx so tenacity can retry.
+    Handles 429 rate limits with exponential backoff (up to 3 retries).
     """
-    response = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": GROQ_MODEL,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": 0.5,
-        },
-        timeout=15,
-    )
-    response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"].strip()
+    import time as _time
+    for attempt in range(3):
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+                "User-Agent": "vera-bot/1.0",
+            },
+            json={
+                "model": GROQ_MODEL,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": 0.5,
+            },
+            timeout=20,
+        )
+        if response.status_code == 429:
+            wait = 2 ** (attempt + 1)  # 2, 4, 8 seconds
+            log.warning("groq_rate_limited", attempt=attempt + 1, wait=wait)
+            _time.sleep(wait)
+            continue
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"].strip()
+    raise RuntimeError("Groq rate limit exceeded after 3 retries")
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +464,25 @@ def _compose_graceful_exit(merchant_name: str, reason: str) -> str:
     return (
         f"Bilkul {first} ji, disturb nahi karunga. "
         f"Jab ready hon tab main yahan hun. \U0001F64F"
+    )
+
+
+def _safe_question_fallback(category: dict) -> str:
+    """Canned fallback for question replies when LLM is unavailable."""
+    return (
+        "Aapka sawaal samajh aaya. Main details check karke kal tak jawab dunga. "
+        "Tab tak koi aur sawaal ho toh batayein?"
+    )
+
+
+def _safe_action_fallback(merchant: dict, category: dict) -> str:
+    """Canned fallback when LLM is unavailable (e.g. rate limited)."""
+    identity = merchant.get("identity", {})
+    name = identity.get("name") or merchant.get("business_name", "")
+    first = _first_word(name) if name else "ji"
+    return (
+        f"Bilkul {first} ji! Main aapke liye yeh kaam abhi shuru karta hoon. "
+        f"Kal tak update karunga. Confirm karein?"
     )
 
 
