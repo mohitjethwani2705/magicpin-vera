@@ -808,10 +808,33 @@ def compose(
 
     logger.debug("User prompt (%d chars):\n%s", len(user_prompt), user_prompt[:800])
 
-    raw_response = _call_llm_with_retry(
-        system_prompt=SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-    )
+    try:
+        raw_response = _call_llm_with_retry(
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+        )
+    except Exception as llm_exc:
+        logger.error("compose() LLM failed (rate limit or error): %s — using fallback", llm_exc)
+        # Return a canned fallback message so tick doesn't crash
+        identity = merchant.get("identity", {})
+        owner = identity.get("owner_first_name") or merchant.get("owner_name", "")
+        first = owner.split()[0] if owner else "ji"
+        lang = category.get("language_preference", "en")
+        body = (
+            f"{first}, aapke performance mein improvement ki zarurat hai. "
+            f"Main aapke liye ek special offer plan kar sakta hoon. Haan / baad mein?"
+            if "hi" in lang else
+            f"{first}, I noticed your business needs a boost. "
+            f"I can help you with a special offer. Yes / not now"
+        )
+        return {
+            "body": body,
+            "cta": "Haan / baad mein" if "hi" in lang else "Yes / not now",
+            "send_as": "vera",
+            "suppression_key": f"fallback:{merchant.get('merchant_id','unknown')}:{trigger.get('id','unknown')}",
+            "rationale": "LLM unavailable (rate limited) — canned fallback used.",
+            "score_estimate": 0,
+        }
 
     logger.debug("Raw LLM response:\n%s", raw_response[:600])
 
